@@ -1,0 +1,22 @@
+[project]
+name = "mcp-code-generator"
+version = "1.0.0"
+description = "AI-powered MCP server generator for Puch AI using Blaxel"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=2.11.2",
+    "python-dotenv>=1.1.1",
+    "httpx>=0.25.0",
+    "aiofiles>=23.0.0",
+    "uvicorn[standard]>=0.24.0",
+    "fastapi>=0.100.0",
+    "pydantic>=2.0.0",
+    "blaxel>=0.2.12",
+    "cryptography>=41.0.0",
+    "openai>=1.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

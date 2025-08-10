@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: mcp-code-generator
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python render_start.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      # Required variables
+      - key: AUTH_TOKEN
+        sync: false  # REQUIRED - Set in Render dashboard
+      - key: MY_NUMBER
+        sync: false  # REQUIRED - Set in Render dashboard
+      - key: OPENAI_API_KEY
+        sync: false  # REQUIRED - Set in Render dashboard
+      - key: DOWNLOAD_BASE_URL
+        sync: false  # REQUIRED - Set to your Render app URL
+      # Optional Blaxel variables (legacy features)
+      - key: BL_WORKSPACE
+        sync: false  # OPTIONAL - Only needed for legacy Blaxel features
+      - key: BL_API_KEY
+        sync: false  # OPTIONAL - Only needed for legacy Blaxel features
+      - key: MORPH_API_KEY
+        sync: false  # OPTIONAL - Only needed for legacy Blaxel features
+      - key: MORPH_MODEL
+        value: morph-v2
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: downloads-storage
+      mountPath: /app/static/downloads
+      sizeGB: 1
