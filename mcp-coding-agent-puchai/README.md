@@ -1,25 +1,25 @@
-# MCP Coding Agent for Puch AI
+# Invoice PDF Generator for Puch AI
 
-An AI-powered generator that produces complete, deployable MCP servers for Puch AI using Blaxel. Provide requirements in natural language and receive a ready-to-deploy project.
+A professional AI-powered invoice PDF generator designed specifically for Puch AI. Generate beautiful, professional invoices with company branding, automatic numbering, tax calculations, and secure download links.
 
 ## Features
 
-- Natural-language to MCP server generation
-- Integration with Blaxel sandboxes and MorphLLM for high-quality code generation
-- Puch AI compatibility
-- End-to-end project scaffolding (documentation, deployment, configuration)
-- Multiple deployment targets (Render, Vercel, and custom)
-- Instant ZIP download
-- Basic syntax validation
+- Professional PDF invoice generation
+- Company branding and customization
+- Automatic invoice numbering
+- Tax calculations (configurable)
+- Terms and conditions
+- Secure 24-hour download links
+- Puch AI authentication integration
+- Fast PDF processing with ReportLab
 
 ## How It Works
 
-1. Requirement capture (natural language)
-2. Intent analysis
-3. Code generation (Blaxel + MorphLLM)
-4. Syntax and structure validation
-5. Packaging into a ZIP
-6. Deploy and connect to Puch AI
+1. Provide invoice details (amount, buyer, company, date)
+2. AI generates professional PDF with branding
+3. PDF is saved to secure storage
+4. Download link provided (expires in 24 hours)
+5. Professional invoice ready for business use
 
 ## Generated Project Structure
 

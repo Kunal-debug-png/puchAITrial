@@ -41,11 +41,7 @@ def get_env_var(key: str, default: str = None) -> str:
 # required env vars (try .env first, then system env)
 MY_NUMBER = get_env_var("MY_NUMBER")
 AUTH_TOKEN = get_env_var("AUTH_TOKEN")
-BL_WORKSPACE = get_env_var("BL_WORKSPACE")
-BL_API_KEY = get_env_var("BL_API_KEY")
-MORPH_API_KEY = get_env_var("MORPH_API_KEY")
-OPENAI_API_KEY = get_env_var("OPENAI_API_KEY")
-DOWNLOAD_BASE_URL = get_env_var("DOWNLOAD_BASE_URL", "https://run.blaxel.ai")
+DOWNLOAD_BASE_URL = get_env_var("DOWNLOAD_BASE_URL", "http://localhost:8086")
 
 # Validate required environment variables
 required_vars = {
@@ -53,23 +49,11 @@ required_vars = {
     "AUTH_TOKEN": AUTH_TOKEN,  # Required for MCP authentication
 }
 
-# optional blaxel vars (legacy features)
-optional_vars = {
-    "BL_WORKSPACE": BL_WORKSPACE,
-    "BL_API_KEY": BL_API_KEY,
-    "MORPH_API_KEY": MORPH_API_KEY,
-}
-
 missing_required = [name for name, value in required_vars.items() if not value]
-missing_optional = [name for name, value in optional_vars.items() if not value]
 
 if missing_required:
     logger.error(f"Missing required environment variables: {missing_required}")
     raise ValueError(f"Required environment variables not set: {missing_required}")
-
-if missing_optional:
-    logger.warning(f"Missing optional Blaxel environment variables: {missing_optional}")
-    logger.warning("Blaxel features will be disabled, but core invoice generation will work.")
 
 # init components
 mcp = FastMCP("Invoice PDF Generator")
@@ -291,21 +275,6 @@ async def system_status() -> list[TextContent]:
     return [TextContent(type="text", text=status_info)]
 
 
-def _format_file_list(files: dict) -> str:
-    """format generated file list."""
-    file_list = []
-    for filename in sorted(files.keys()):
-        size = len(files[filename])
-        file_list.append(f"  - {filename} ({size:,} bytes)")
-    return "\n".join(file_list)
-
-
-def _format_syntax_results(results: dict) -> str:
-    """format syntax validation results."""
-    result_lines = []
-    for filename, result in results.items():
-        result_lines.append(f"  - {filename}: {result}")
-    return "\n".join(result_lines)
 
 
 async def main() -> None:
@@ -319,26 +288,11 @@ async def main() -> None:
         print(f"Phone: {MY_NUMBER}")
     else:
         print("Phone: NOT CONFIGURED")
-    
-    if BL_WORKSPACE:
-        print(f"Blaxel Workspace: {BL_WORKSPACE}")
+        
+    if AUTH_TOKEN:
+        print("Auth Token: CONFIGURED")
     else:
-        print("Blaxel Workspace: NOT CONFIGURED")
-    
-    if BL_API_KEY:
-        print("Blaxel API: CONFIGURED")
-    else:
-        print("Blaxel API: NOT CONFIGURED")
-    
-    if MORPH_API_KEY:
-        print("MorphLLM API: CONFIGURED")
-    else:
-        print("MorphLLM API: NOT CONFIGURED")
-    
-    if OPENAI_API_KEY:
-        print("OpenAI API: CONFIGURED")
-    else:
-        print("OpenAI API: NOT CONFIGURED")
+        print("Auth Token: NOT CONFIGURED")
     
     # create downloads directory
     downloads_dir = Path("static/downloads")
@@ -378,7 +332,7 @@ async def main() -> None:
         }
     
     print("=" * 60)
-    print(f"Server: wss://run.blaxel.ai/{BL_WORKSPACE}/functions/invoice-pdf-generator")
+    print(f"Server: {DOWNLOAD_BASE_URL}")
     print(f"Downloads: {DOWNLOAD_BASE_URL}/download/")
     print("=" * 60)
     
