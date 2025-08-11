@@ -8,3 +8,4 @@ pydantic>=2.0.0
 blaxel>=0.2.12
 cryptography>=41.0.0
 openai>=1.0.0
+reportlab>=4.0.0

@@ -76,27 +76,48 @@ class DownloadManager:
             self._cleanup_expired_download(download_id, record)
             raise HTTPException(status_code=410, detail="Download has expired")
         
-        # check if zip file exists
-        zip_filename = record.get("zip_filename", f"mcp_{download_id}.zip")
-        zip_path = self.downloads_dir / zip_filename
+        # check if file exists (could be ZIP or PDF)
+        file_path = None
+        media_type = "application/octet-stream"
+        content_description = "Generated File"
         
-        if not zip_path.exists():
-            logger.error(f"Zip file not found: {zip_path}")
+        # Handle different file types
+        if record.get("type") == "invoice_pdf":
+            # PDF invoice file
+            pdf_filename = record.get("pdf_filename", f"invoice_{download_id}.pdf")
+            file_path = self.downloads_dir / pdf_filename
+            media_type = "application/pdf"
+            content_description = "Generated Invoice PDF"
+            
+            # generate a descriptive filename for invoice
+            buyer_slug = self._create_filename_slug(record.get("buyer_name", "invoice"))
+            company_slug = self._create_filename_slug(record.get("company_name", "company"))
+            invoice_number = record.get("invoice_number", download_id[:8])
+            download_filename = f"{company_slug}_{buyer_slug}_{invoice_number}.pdf"
+        else:
+            # Legacy ZIP file (MCP packages)
+            zip_filename = record.get("zip_filename", f"mcp_{download_id}.zip")
+            file_path = self.downloads_dir / zip_filename
+            media_type = "application/zip"
+            content_description = "Generated MCP Package"
+            
+            # generate a descriptive filename for MCP
+            prompt_slug = self._create_filename_slug(record.get("prompt", "generated-mcp"))
+            download_filename = f"{prompt_slug}_{download_id[:8]}.zip"
+        
+        if not file_path.exists():
+            logger.error(f"File not found: {file_path}")
             raise HTTPException(status_code=404, detail="Download file not found")
         
         # serve the file
-        logger.info(f"Serving download: {zip_filename} ({zip_path.stat().st_size:,} bytes)")
-        
-        # generate a descriptive filename
-        prompt_slug = self._create_filename_slug(record.get("prompt", "generated-mcp"))
-        download_filename = f"{prompt_slug}_{download_id[:8]}.zip"
+        logger.info(f"Serving download: {file_path.name} ({file_path.stat().st_size:,} bytes)")
         
         return FileResponse(
-            path=zip_path,
+            path=file_path,
             filename=download_filename,
-            media_type="application/zip",
+            media_type=media_type,
             headers={
-                "Content-Description": "Generated MCP Package",
+                "Content-Description": content_description,
                 "X-Generation-ID": record.get("generation_id", "unknown")
             }
         )
@@ -104,12 +125,21 @@ class DownloadManager:
     def _cleanup_expired_download(self, download_id: str, record: Dict) -> None:
         """clean up an expired download."""
         try:
-            # remove zip file
-            zip_filename = record.get("zip_filename", f"mcp_{download_id}.zip")
-            zip_path = self.downloads_dir / zip_filename
-            if zip_path.exists():
-                zip_path.unlink()
-                logger.debug(f"Removed expired zip: {zip_filename}")
+            # remove file (could be ZIP or PDF)
+            if record.get("type") == "invoice_pdf":
+                # PDF invoice file
+                pdf_filename = record.get("pdf_filename", f"invoice_{download_id}.pdf")
+                file_path = self.downloads_dir / pdf_filename
+                if file_path.exists():
+                    file_path.unlink()
+                    logger.debug(f"Removed expired PDF: {pdf_filename}")
+            else:
+                # Legacy ZIP file
+                zip_filename = record.get("zip_filename", f"mcp_{download_id}.zip")
+                zip_path = self.downloads_dir / zip_filename
+                if zip_path.exists():
+                    zip_path.unlink()
+                    logger.debug(f"Removed expired zip: {zip_filename}")
             
             # remove record file
             record_path = self.downloads_dir / f"{download_id}.json"
@@ -154,10 +184,15 @@ class DownloadManager:
             expires_at = datetime.fromisoformat(record["expires_at"])
             is_expired = datetime.now() > expires_at
             
-            # check if file exists
-            zip_filename = record.get("zip_filename", f"mcp_{download_id}.zip")
-            zip_path = self.downloads_dir / zip_filename
-            file_exists = zip_path.exists()
+            # check if file exists (could be ZIP or PDF)
+            if record.get("type") == "invoice_pdf":
+                pdf_filename = record.get("pdf_filename", f"invoice_{download_id}.pdf")
+                file_path = self.downloads_dir / pdf_filename
+            else:
+                zip_filename = record.get("zip_filename", f"mcp_{download_id}.zip")
+                file_path = self.downloads_dir / zip_filename
+            
+            file_exists = file_path.exists()
             
             return {
                 "download_id": download_id,
@@ -167,7 +202,8 @@ class DownloadManager:
                 "is_expired": is_expired,
                 "file_exists": file_exists,
                 "file_count": record.get("file_count"),
-                "zip_size": record.get("zip_size"),
+                "file_size": record.get("zip_size", record.get("pdf_size", 0)),
+                "file_type": record.get("type", "zip"),
                 "prompt": record.get("prompt", "")[:100]  # Truncated
             }
             
