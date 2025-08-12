@@ -75,133 +75,6 @@ async def validate() -> str:
 
 @mcp.tool(description="Generate a professional invoice PDF")
 async def generate_invoice(
-    amount: Annotated[float, Field(description="Invoice amount in decimal format (e.g., 1250.00)")],
-    buyer_name: Annotated[str, Field(description="Name of the buyer/client")],
-    company_name: Annotated[str, Field(description="Company name issuing the invoice")],
-    date: Annotated[str, Field(description="Invoice date in YYYY-MM-DD format")] = None,
-    item_name: Annotated[str, Field(description="Item or service name")] = None,
-    tax_rate: Annotated[float, Field(description="Tax rate as decimal (e.g., 0.18 for 18%)")] = 0.0,
-    quantity: Annotated[int, Field(description="Item quantity")] = 1,
-    currency_symbol: Annotated[str, Field(description="Currency symbol")] = "₹"
-) -> list[TextContent]:
-    """generate a professional invoice pdf from provided details."""
-    start_time = datetime.now()
-    generation_id = f"inv_{int(start_time.timestamp())}"
-    
-    # use current date if not provided
-    if date is None:
-        date = datetime.now().strftime("%Y-%m-%d")
-    
-    # progress logging
-    def log_progress(message: str):
-        """Log progress updates with timestamps."""
-        logger.info(f"[{generation_id}] Progress: {message}")
-    
-    try:
-        logger.info(f"[{generation_id}] Starting invoice generation for: {buyer_name} - ${amount}")
-        
-        # validate inputs
-        if amount <= 0:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message="Amount must be greater than 0"
-            ))
-        
-        if not buyer_name.strip():
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message="Buyer name cannot be empty"
-            ))
-        
-        if not company_name.strip():
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message="Company name cannot be empty"
-            ))
-        
-        # validate date format
-        try:
-            datetime.strptime(date, "%Y-%m-%d")
-        except ValueError:
-            raise McpError(ErrorData(
-                code=INTERNAL_ERROR,
-                message="Date must be in YYYY-MM-DD format"
-            ))
-        
-        log_progress("Generating professional invoice PDF...")
-        
-        # generate invoice pdf
-        pdf_data = await invoice_generator.generate_invoice_pdf(
-            amount=amount,
-            buyer_name=buyer_name,
-            company_name=company_name,
-            date=date,
-            generation_id=generation_id,
-            item_name=item_name,
-            tax_rate=tax_rate,
-            quantity=quantity,
-            currency_symbol=currency_symbol
-        )
-        
-        log_progress("Creating downloadable PDF package...")
-        
-        # save pdf and get download url
-        download_url = await create_invoice_pdf(
-            pdf_data=pdf_data,
-            buyer_name=buyer_name,
-            company_name=company_name,
-            amount=amount,
-            date=date,
-            generation_id=generation_id
-        )
-        
-        # track generation metrics
-        generation_time = (datetime.now() - start_time).total_seconds()
-        log_progress(f"Invoice PDF generated successfully in {generation_time:.1f}s")
-        
-        # format response
-        tax_display = f"Tax Rate: {tax_rate*100:.0f}%" if tax_rate > 0 else "Tax Rate: 0% (No tax)"
-        item_display = item_name if item_name and item_name.strip() else "Not Applicable"
-        
-        success_message = f"""**Invoice PDF Generated Successfully!**
-
-**Invoice Details:**
-- Company: {company_name}
-- Buyer: {buyer_name}
-- Item: {item_display}
-- Quantity: {quantity}
-- Amount: {currency_symbol}{amount:,.2f}
-- {tax_display}
-- Currency: {currency_symbol}
-- Date: {date}
-- Generation ID: {generation_id}
-
-**Download Your Invoice**: {download_url}
-**Link Expires**: 24 hours
-**Generation Time**: {generation_time:.1f} seconds
-
-**Invoice Features:**
-- Professional PDF format
-- Company branding
-- Configurable item descriptions
-- Flexible tax calculations
-- Customizable currency symbols
-- Terms and conditions
-
-Your professional invoice is ready for download!"""
-        
-        return [TextContent(type="text", text=success_message)]
-        
-    except Exception as e:
-        logger.error(f"[{generation_id}] Generation failed: {str(e)}")
-        raise McpError(ErrorData(
-            code=INTERNAL_ERROR,
-            message=f"Invoice generation failed: {str(e)}"
-        ))
-
-
-@mcp.tool(description="Generate a professional invoice PDF with multiple items")
-async def generate_multi_item_invoice(
     buyer_name: Annotated[str, Field(description="Name of the buyer/client")],
     company_name: Annotated[str, Field(description="Company name issuing the invoice")],
     items: Annotated[str, Field(description="JSON string of items: [{\"name\": \"Item 1\", \"quantity\": 2, \"rate\": 100.00}, {\"name\": \"Item 2\", \"quantity\": 1, \"rate\": 250.50}]")],
@@ -324,7 +197,7 @@ async def generate_multi_item_invoice(
         tax_amount = subtotal * tax_rate
         final_total = subtotal + tax_amount
         
-        success_message = f"""**Multi-Item Invoice PDF Generated Successfully!**
+        success_message = f"""**Invoice PDF Generated Successfully!**
 
 **Invoice Details:**
 - Company: {company_name}
@@ -352,16 +225,18 @@ async def generate_multi_item_invoice(
 - Customizable currency symbols
 - Terms and conditions
 
-Your professional multi-item invoice is ready for download!"""
+Your professional invoice is ready for download!"""
         
         return [TextContent(type="text", text=success_message)]
         
     except Exception as e:
-        logger.error(f"[{generation_id}] Multi-item generation failed: {str(e)}")
+        logger.error(f"[{generation_id}] Generation failed: {str(e)}")
         raise McpError(ErrorData(
             code=INTERNAL_ERROR,
-            message=f"Multi-item invoice generation failed: {str(e)}"
+            message=f"Invoice generation failed: {str(e)}"
         ))
+
+
 
 
 @mcp.tool(description="Get examples of invoice formats")
@@ -369,69 +244,56 @@ async def get_invoice_examples() -> list[TextContent]:
     """return examples of invoice generation."""
     examples = """**Invoice Generation Examples**
 
-**Basic Invoice (Defaults):**
-- Amount: 1500.00
-- Buyer Name: "John Smith"
-- Company Name: "Acme Solutions Inc"
-- Date: "2024-01-15"
-(Uses defaults: "Not Applicable" item, 0% tax, quantity 1, ₹ currency)
-
-**Service Invoice with Tax:**
-- Amount: 2750.50
-- Buyer Name: "Sarah Johnson"
-- Company Name: "TechCorp Ltd"
-- Item Name: "Web Development Services"
-- Tax Rate: 0.18 (18%)
-- Quantity: 1
-- Currency Symbol: "₹"
-
-**Product Invoice (Multiple Items):**
-- Amount: 850.25
-- Buyer Name: "Mike Davis"
-- Company Name: "Digital Services LLC"
-- Item Name: "Software License"
-- Tax Rate: 0.12 (12%)
-- Quantity: 5
-- Currency Symbol: "$"
-
-**NEW: Multi-Item Invoice:**
-Use `generate_multi_item_invoice` for multiple different items:
+**Multi-Item Invoice:**
+Use `generate_invoice` for multiple items in a single invoice:
 - Buyer Name: "Sarah Johnson"
 - Company Name: "TechCorp Ltd"
 - Items: '[{"name": "Web Development", "quantity": 1, "rate": 1500.00}, {"name": "SEO Services", "quantity": 2, "rate": 500.00}]'
 - Tax Rate: 0.18 (18%)
 - Currency Symbol: "$"
 
+**Single Item Invoice Example:**
+- Buyer Name: "Mike Davis"
+- Company Name: "Digital Services LLC"
+- Items: '[{"name": "Software License", "quantity": 5, "rate": 170.05}]'
+- Tax Rate: 0.12 (12%)
+- Currency Symbol: "$"
+
+**Multiple Items Example:**
+- Buyer Name: "John Smith"
+- Company Name: "Acme Solutions Inc"
+- Items: '[{"name": "Consulting Services", "quantity": 1, "rate": 1200.00}, {"name": "Software License", "quantity": 2, "rate": 150.00}, {"name": "Cloud Storage", "quantity": 1, "rate": 99.99}]'
+- Date: "2024-01-15"
+- Tax Rate: 0.1 (10%)
+- Currency Symbol: "€"
+
 **Professional Features:**
 - Automatic invoice numbering
 - Professional PDF formatting
 - Company branding elements
 - Configurable tax calculations (0% to any %)
-- Customizable item descriptions
+- Multiple item support
 - Flexible currency symbols
 - Terms and conditions
 - Payment instructions
 
-**New Parameters:**
-- item_name: Custom item/service name (default: "Not Applicable")
+**Parameters:**
+- items: JSON array of items, each with name, quantity and rate
 - tax_rate: Tax as decimal (e.g., 0.18 for 18%, default: 0.0)
-- quantity: Item quantity (default: 1)
 - currency_symbol: Currency symbol (default: "₹")
 
 **Supported Formats:**
 - Date: YYYY-MM-DD (e.g., 2024-01-15)
-- Amount: Decimal format (e.g., 1250.00)
 - Tax Rate: Decimal (e.g., 0.15 for 15%)
 - Names: Full names or company names
 - Currency: Any symbol (₹, $, €, £, etc.)
 
 **Usage Tips:**
-- All new parameters are optional with sensible defaults
 - Use current date if no date specified
-- Amount must be greater than 0
 - Tax rate of 0.0 means no tax applied
 - Generated PDFs are professionally formatted
 - Download links expire in 24 hours
+- Each item must have name, quantity, and rate properties
 
 **Ready to generate your customized professional invoice!**
 """
