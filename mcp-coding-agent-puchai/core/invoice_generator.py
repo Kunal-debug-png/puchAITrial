@@ -221,3 +221,161 @@ class InvoiceGenerator:
             # Fallback to 30 days from today
             due_date = datetime.now() + timedelta(days=days)
             return due_date.strftime("%Y-%m-%d")
+    
+    async def generate_multi_item_invoice_pdf(
+        self,
+        items: list,
+        buyer_name: str,
+        company_name: str,
+        date: str,
+        generation_id: str,
+        tax_rate: float = 0.0,
+        currency_symbol: str = "₹"
+    ) -> bytes:
+        """generate a professional multi-item invoice pdf."""
+        # Ensure currency symbol is not empty
+        if not currency_symbol:
+            currency_symbol = "₹"  # Default to Rupee
+        
+        logger.info(f"[{generation_id}] Generating multi-item PDF for {buyer_name} - {len(items)} items")
+        
+        try:
+            # Create PDF in memory
+            buffer = io.BytesIO()
+            doc = SimpleDocTemplate(
+                buffer,
+                pagesize=letter,
+                rightMargin=72,
+                leftMargin=72,
+                topMargin=72,
+                bottomMargin=18
+            )
+            
+            # Build invoice content
+            story = []
+            
+            # Company header
+            story.append(Paragraph(company_name, self.company_style))
+            story.append(Spacer(1, 12))
+            
+            # Invoice title and number
+            invoice_number = self._generate_invoice_number(generation_id)
+            story.append(Paragraph("INVOICE", self.title_style))
+            story.append(Paragraph(f"Invoice #: {invoice_number}", self.header_style))
+            story.append(Spacer(1, 20))
+            
+            # Invoice details table
+            invoice_data = [
+                ["Invoice Date:", date],
+                ["Due Date:", self._calculate_due_date(date)],
+                ["Bill To:", buyer_name],
+                ["From:", company_name],
+            ]
+            
+            details_table = Table(invoice_data, colWidths=[2*inch, 4*inch])
+            details_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ]))
+            
+            story.append(details_table)
+            story.append(Spacer(1, 30))
+            
+            # Multi-item line items table
+            line_items_data = [
+                ["Description", "Quantity", "Rate", "Amount"],
+            ]
+            
+            # Add each item as a separate row
+            subtotal = 0
+            for item in items:
+                item_name = item['name']
+                quantity = item['quantity']
+                rate = item['rate']
+                amount = quantity * rate
+                subtotal += amount
+                
+                line_items_data.append([
+                    item_name,
+                    str(quantity),
+                    f"{currency_symbol}{rate:.2f}",
+                    f"{currency_symbol}{amount:.2f}"
+                ])
+            
+            # Calculate tax
+            tax_amount = subtotal * tax_rate
+            total_amount = subtotal + tax_amount
+            
+            # Add totals section
+            line_items_data.append(["", "", "Subtotal:", f"{currency_symbol}{subtotal:.2f}"])
+            
+            if tax_rate > 0:
+                tax_percentage = tax_rate * 100
+                line_items_data.append(["", "", f"Tax ({tax_percentage:.0f}%):", f"{currency_symbol}{tax_amount:.2f}"])
+            
+            line_items_data.append(["", "", "Total:", f"{currency_symbol}{total_amount:.2f}"])
+            
+            items_table = Table(line_items_data, colWidths=[3*inch, 1*inch, 1.5*inch, 1.5*inch])
+            items_table.setStyle(TableStyle([
+                # Header row
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+                
+                # Data rows (item rows)
+                ('ALIGN', (0, 1), (0, len(items)), 'LEFT'),  # Description left-aligned
+                ('ALIGN', (1, 1), (-1, -1), 'RIGHT'),  # Numbers right-aligned
+                
+                # Grid for item rows
+                ('GRID', (0, 0), (-1, len(items)), 1, colors.black),
+                
+                # Totals section styling
+                ('FONTNAME', (2, len(items)+1), (-1, -1), 'Helvetica-Bold'),
+                ('BACKGROUND', (2, -1), (-1, -1), colors.lightgrey),
+            ]))
+            
+            story.append(items_table)
+            story.append(Spacer(1, 40))
+            
+            # Payment terms
+            terms_text = """
+            <b>Payment Terms:</b><br/>
+            Payment is due within 30 days of invoice date.<br/>
+            Late payments may incur additional fees.<br/><br/>
+            
+            <b>Thank you for your business!</b><br/>
+            For questions about this invoice, please contact us.
+            """
+            
+            story.append(Paragraph(terms_text, self.styles['Normal']))
+            
+            # Footer
+            story.append(Spacer(1, 30))
+            footer_text = f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Invoice ID: {generation_id}"
+            footer_style = ParagraphStyle(
+                'FooterStyle',
+                parent=self.styles['Normal'],
+                fontSize=8,
+                textColor=colors.grey,
+                alignment=1  # Center
+            )
+            story.append(Paragraph(footer_text, footer_style))
+            
+            # Build PDF
+            doc.build(story)
+            
+            # Get PDF data
+            pdf_data = buffer.getvalue()
+            buffer.close()
+            
+            logger.info(f"[{generation_id}] Multi-item PDF generated successfully: {len(pdf_data)} bytes")
+            return pdf_data
+            
+        except Exception as e:
+            logger.error(f"[{generation_id}] Failed to generate multi-item PDF: {e}")
+            raise
