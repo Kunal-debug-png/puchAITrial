@@ -77,7 +77,11 @@ async def generate_invoice(
     amount: Annotated[float, Field(description="Invoice amount in decimal format (e.g., 1250.00)")],
     buyer_name: Annotated[str, Field(description="Name of the buyer/client")],
     company_name: Annotated[str, Field(description="Company name issuing the invoice")],
-    date: Annotated[str, Field(description="Invoice date in YYYY-MM-DD format")] = None
+    date: Annotated[str, Field(description="Invoice date in YYYY-MM-DD format")] = None,
+    item_name: Annotated[str, Field(description="Item or service name")] = None,
+    tax_rate: Annotated[float, Field(description="Tax rate as decimal (e.g., 0.18 for 18%)")] = 0.0,
+    quantity: Annotated[int, Field(description="Item quantity")] = 1,
+    currency_symbol: Annotated[str, Field(description="Currency symbol")] = "₹"
 ) -> list[TextContent]:
     """generate a professional invoice pdf from provided details."""
     start_time = datetime.now()
@@ -131,7 +135,11 @@ async def generate_invoice(
             buyer_name=buyer_name,
             company_name=company_name,
             date=date,
-            generation_id=generation_id
+            generation_id=generation_id,
+            item_name=item_name,
+            tax_rate=tax_rate,
+            quantity=quantity,
+            currency_symbol=currency_symbol
         )
         
         log_progress("Creating downloadable PDF package...")
@@ -151,12 +159,19 @@ async def generate_invoice(
         log_progress(f"Invoice PDF generated successfully in {generation_time:.1f}s")
         
         # format response
+        tax_display = f"Tax Rate: {tax_rate*100:.0f}%" if tax_rate > 0 else "Tax Rate: 0% (No tax)"
+        item_display = item_name if item_name and item_name.strip() else "Not Applicable"
+        
         success_message = f"""**Invoice PDF Generated Successfully!**
 
 **Invoice Details:**
 - Company: {company_name}
 - Buyer: {buyer_name}
-- Amount: ${amount:,.2f}
+- Item: {item_display}
+- Quantity: {quantity}
+- Amount: {currency_symbol}{amount:,.2f}
+- {tax_display}
+- Currency: {currency_symbol}
 - Date: {date}
 - Generation ID: {generation_id}
 
@@ -167,8 +182,9 @@ async def generate_invoice(
 **Invoice Features:**
 - Professional PDF format
 - Company branding
-- Itemized billing structure
-- Tax calculations (if applicable)
+- Configurable item descriptions
+- Flexible tax calculations
+- Customizable currency symbols
 - Terms and conditions
 
 Your professional invoice is ready for download!"""
@@ -188,46 +204,63 @@ async def get_invoice_examples() -> list[TextContent]:
     """return examples of invoice generation."""
     examples = """**Invoice Generation Examples**
 
-**Basic Invoice:**
+**Basic Invoice (Defaults):**
 - Amount: 1500.00
 - Buyer Name: "John Smith"
 - Company Name: "Acme Solutions Inc"
 - Date: "2024-01-15"
+(Uses defaults: "Not Applicable" item, 0% tax, quantity 1, ₹ currency)
 
-**Service Invoice:**
+**Service Invoice with Tax:**
 - Amount: 2750.50
 - Buyer Name: "Sarah Johnson"
 - Company Name: "TechCorp Ltd"
-- Date: "2024-02-01"
+- Item Name: "Web Development Services"
+- Tax Rate: 0.18 (18%)
+- Quantity: 1
+- Currency Symbol: "₹"
 
-**Product Invoice:**
+**Product Invoice (Multiple Items):**
 - Amount: 850.25
 - Buyer Name: "Mike Davis"
 - Company Name: "Digital Services LLC"
-- Date: "2024-01-30"
+- Item Name: "Software License"
+- Tax Rate: 0.12 (12%)
+- Quantity: 5
+- Currency Symbol: "$"
 
 **Professional Features:**
 - Automatic invoice numbering
 - Professional PDF formatting
 - Company branding elements
-- Tax calculations (where applicable)
+- Configurable tax calculations (0% to any %)
+- Customizable item descriptions
+- Flexible currency symbols
 - Terms and conditions
 - Payment instructions
-- Due date calculations
+
+**New Parameters:**
+- item_name: Custom item/service name (default: "Not Applicable")
+- tax_rate: Tax as decimal (e.g., 0.18 for 18%, default: 0.0)
+- quantity: Item quantity (default: 1)
+- currency_symbol: Currency symbol (default: "₹")
 
 **Supported Formats:**
 - Date: YYYY-MM-DD (e.g., 2024-01-15)
 - Amount: Decimal format (e.g., 1250.00)
+- Tax Rate: Decimal (e.g., 0.15 for 15%)
 - Names: Full names or company names
+- Currency: Any symbol (₹, $, €, £, etc.)
 
 **Usage Tips:**
+- All new parameters are optional with sensible defaults
 - Use current date if no date specified
 - Amount must be greater than 0
-- All fields are required except date
+- Tax rate of 0.0 means no tax applied
 - Generated PDFs are professionally formatted
 - Download links expire in 24 hours
 
-**Ready to generate your professional invoice!**
+**Ready to generate your customized professional invoice!**
 """
     
     return [TextContent(type="text", text=examples)]

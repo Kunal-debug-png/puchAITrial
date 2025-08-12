@@ -58,10 +58,22 @@ class InvoiceGenerator:
         buyer_name: str,
         company_name: str,
         date: str,
-        generation_id: str
+        generation_id: str,
+        item_name: str = None,
+        tax_rate: float = 0.0,
+        quantity: int = 1,
+        currency_symbol: str = "₹"
     ) -> bytes:
         """generate a professional invoice pdf."""
-        logger.info(f"[{generation_id}] Generating PDF for {buyer_name} - ${amount}")
+        # Set default item name if not provided
+        if item_name is None or item_name.strip() == "":
+            item_name = "Not Applicable"
+        
+        # Ensure currency symbol is not empty
+        if not currency_symbol:
+            currency_symbol = "₹"  # Default to Rupee
+        
+        logger.info(f"[{generation_id}] Generating PDF for {buyer_name} - {currency_symbol}{amount}")
         
         try:
             # Create PDF in memory
@@ -108,22 +120,27 @@ class InvoiceGenerator:
             story.append(Spacer(1, 30))
             
             # Line items table
+            # Calculate subtotal based on quantity and rate
+            unit_rate = amount / quantity if quantity > 0 else amount
+            subtotal = unit_rate * quantity
+            
             line_items_data = [
                 ["Description", "Quantity", "Rate", "Amount"],
-                ["Professional Services", "1", f"${amount:.2f}", f"${amount:.2f}"],
+                [item_name, str(quantity), f"{currency_symbol}{unit_rate:.2f}", f"{currency_symbol}{subtotal:.2f}"],
             ]
             
-            # Calculate tax (assuming 10% for demo - can be customized)
-            tax_rate = 0.10
-            subtotal = amount
+            # Calculate tax using the provided tax_rate
             tax_amount = subtotal * tax_rate
             total_amount = subtotal + tax_amount
             
-            line_items_data.extend([
-                ["", "", "Subtotal:", f"${subtotal:.2f}"],
-                ["", "", "Tax (10%):", f"${tax_amount:.2f}"],
-                ["", "", "Total:", f"${total_amount:.2f}"],
-            ])
+            # Add totals section
+            line_items_data.append(["", "", "Subtotal:", f"{currency_symbol}{subtotal:.2f}"])
+            
+            if tax_rate > 0:
+                tax_percentage = tax_rate * 100
+                line_items_data.append(["", "", f"Tax ({tax_percentage:.0f}%):", f"{currency_symbol}{tax_amount:.2f}"])
+            
+            line_items_data.append(["", "", "Total:", f"{currency_symbol}{total_amount:.2f}"])
             
             items_table = Table(line_items_data, colWidths=[3*inch, 1*inch, 1.5*inch, 1.5*inch])
             items_table.setStyle(TableStyle([
