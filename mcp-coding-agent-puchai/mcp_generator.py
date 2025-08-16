@@ -19,8 +19,10 @@ from mcp.types import INTERNAL_ERROR, TextContent
 from pydantic import Field
 
 from core.invoice_generator import InvoiceGenerator
+from core.csv_dashboard_generator import CSVDashboardGenerator
 from utils.pdf_creator import create_invoice_pdf
 from utils.download_manager import DownloadManager
+from utils.dashboard_creator import create_dashboard_html, serve_dashboard, get_dashboard_stats
 from fastapi import FastAPI
 
 # configure logging
@@ -57,8 +59,9 @@ if missing_required:
     raise ValueError(f"Required environment variables not set: {missing_required}")
 
 # init components
-mcp = FastMCP("Invoice PDF Generator")
+mcp = FastMCP("Puch AI Multi-Tool Generator")
 invoice_generator = InvoiceGenerator()
+csv_dashboard_generator = CSVDashboardGenerator()
 download_manager = DownloadManager()
 
 
@@ -301,43 +304,282 @@ Use `generate_invoice` for multiple items in a single invoice:
     return [TextContent(type="text", text=examples)]
 
 
-@mcp.tool(description="Check the status of the Invoice PDF generator system")
+# CSV Dashboard Generator Tools
+
+@mcp.tool(description="Generate a beautiful interactive dashboard from CSV data")
+async def generate_csv_dashboard(
+    csv_content: Annotated[str, Field(description="CSV file content as text string")],
+    dashboard_title: Annotated[str, Field(description="Title for the dashboard")] = "CSV Data Dashboard",
+    csv_filename: Annotated[str, Field(description="Original CSV filename for reference")] = "data.csv",
+    theme: Annotated[str, Field(description="Dashboard theme (modern, classic, dark)")] = "modern"
+) -> list[TextContent]:
+    """Generate a stunning interactive dashboard from CSV data with AI-powered insights."""
+    start_time = datetime.now()
+    generation_id = f"dash_{int(start_time.timestamp())}"
+    
+    def log_progress(message: str):
+        """Log progress updates with timestamps."""
+        logger.info(f"[{generation_id}] Progress: {message}")
+    
+    try:
+        logger.info(f"[{generation_id}] Starting CSV dashboard generation: {dashboard_title}")
+        
+        # Validate inputs
+        if not csv_content.strip():
+            raise McpError(ErrorData(
+                code=INTERNAL_ERROR,
+                message="CSV content cannot be empty"
+            ))
+        
+        if not dashboard_title.strip():
+            dashboard_title = "CSV Data Dashboard"
+        
+        log_progress("Analyzing CSV structure and data types...")
+        
+        # Analyze CSV structure
+        analysis = await csv_dashboard_generator.analyze_csv_structure(csv_content)
+        
+        log_progress(f"Analysis complete: {analysis['total_rows']} rows, {analysis['total_columns']} columns")
+        log_progress(f"Data quality score: {analysis['data_quality_score']:.1f}%")
+        
+        log_progress("Generating interactive dashboard HTML...")
+        
+        # Generate dashboard HTML
+        dashboard_html = await csv_dashboard_generator.generate_dashboard_html(
+            csv_content=csv_content,
+            analysis=analysis,
+            dashboard_title=dashboard_title,
+            theme=theme
+        )
+        
+        log_progress("Saving dashboard and creating download link...")
+        
+        # Save dashboard and get download URL
+        download_url = await create_dashboard_html(
+            html_content=dashboard_html,
+            dashboard_title=dashboard_title,
+            csv_filename=csv_filename,
+            analysis=analysis,
+            generation_id=generation_id
+        )
+        
+        # Track generation metrics
+        generation_time = (datetime.now() - start_time).total_seconds()
+        log_progress(f"Dashboard generated successfully in {generation_time:.1f}s")
+        
+        # Generate insights summary for response
+        insights_summary = []
+        numeric_cols = [col for col, dtype in analysis['data_types'].items() if dtype == 'numeric']
+        categorical_cols = [col for col, dtype in analysis['data_types'].items() if dtype == 'categorical']
+        
+        if numeric_cols:
+            insights_summary.append(f"📊 {len(numeric_cols)} numeric columns ready for statistical analysis")
+        if categorical_cols:
+            insights_summary.append(f"🏷️ {len(categorical_cols)} categorical columns for grouping and filtering")
+        
+        # Chart recommendations
+        chart_recommendations = []
+        for rec in analysis['recommended_charts'][:3]:  # Top 3 recommendations
+            chart_recommendations.append(f"• {rec['title']}: {rec['description']}")
+        
+        success_message = f"""**🎯 CSV Dashboard Generated Successfully!**
+
+**📋 Dataset Overview:**
+- **Rows**: {analysis['total_rows']:,}
+- **Columns**: {analysis['total_columns']}
+- **Data Quality Score**: {analysis['data_quality_score']:.1f}%
+- **Missing Data**: {sum(1 for col, missing in analysis['missing_values'].items() if missing['percentage'] > 0)} columns have missing values
+
+**🔍 Key Insights:**
+{chr(10).join(insights_summary) if insights_summary else '• Dataset ready for analysis'}
+
+**📈 Recommended Visualizations:**
+{chr(10).join(chart_recommendations) if chart_recommendations else '• Basic charts available based on data types'}
+
+**🎨 Dashboard Features:**
+- Interactive charts with Chart.js
+- Responsive Bootstrap design
+- Data filtering and search
+- Statistical insights
+- Modern {theme} theme
+- AI-powered recommendations
+- Data quality analysis
+- Professional styling
+
+**🌐 Your Interactive Dashboard**: {download_url}
+**⏱️ Generation Time**: {generation_time:.1f} seconds
+**🔗 Link Access**: Available 24/7 for easy sharing
+**📱 Responsive**: Works perfectly on all devices
+
+**🚀 Next Steps:**
+- Open the dashboard to explore your data
+- Share the link with your team
+- Use insights to make data-driven decisions
+- Export charts and findings
+
+Your beautiful, interactive dashboard is ready to transform your data into insights! 🎉"""
+        
+        return [TextContent(type="text", text=success_message)]
+        
+    except Exception as e:
+        logger.error(f"[{generation_id}] Dashboard generation failed: {str(e)}")
+        raise McpError(ErrorData(
+            code=INTERNAL_ERROR,
+            message=f"CSV dashboard generation failed: {str(e)}"
+        ))
+
+
+@mcp.tool(description="Get examples and usage instructions for CSV dashboard generation")
+async def get_csv_dashboard_examples() -> list[TextContent]:
+    """Return examples and best practices for CSV dashboard generation."""
+    examples = """**🎯 CSV Dashboard Generator Examples**
+
+**📁 CSV Format Requirements:**
+- First row should contain column headers
+- Data should be clean and consistent
+- Missing values are automatically handled
+- Supports numeric, categorical, and date columns
+
+**📊 Sample CSV Structure:**
+```csv
+Date,Product,Sales,Region,Customer_Type
+2024-01-01,Widget A,1200.50,North,Premium
+2024-01-02,Widget B,800.25,South,Standard
+2024-01-03,Widget A,1500.00,East,Premium
+```
+
+**🎨 Usage Examples:**
+
+**Basic Dashboard:**
+- CSV Content: [Your CSV data as text]
+- Dashboard Title: "Sales Performance Dashboard"
+- Theme: "modern"
+
+**Advanced Dashboard:**
+- CSV Content: [Your CSV data as text]
+- Dashboard Title: "Customer Analytics Dashboard"
+- CSV Filename: "customer_data_2024.csv"
+- Theme: "dark"
+
+**💡 Best Practices:**
+
+**Data Preparation:**
+- Clean column names (no special characters)
+- Consistent date formats (YYYY-MM-DD)
+- Remove duplicate headers
+- Handle missing values appropriately
+
+**Column Types Detected:**
+- **Numeric**: Sales figures, quantities, scores
+- **Categorical**: Regions, product types, status
+- **DateTime**: Dates, timestamps
+- **Text**: Descriptions, comments, IDs
+
+**🚀 Dashboard Features:**
+
+**Interactive Charts:**
+- Bar charts for category comparisons
+- Line charts for time series data
+- Pie charts for proportional data
+- Scatter plots for correlations
+- Histograms for distributions
+
+**AI-Powered Insights:**
+- Data quality assessment
+- Missing data analysis
+- Statistical summaries
+- Chart recommendations
+- Trend identification
+
+**Professional Design:**
+- Responsive Bootstrap layout
+- Modern color schemes
+- Interactive filters
+- Export capabilities
+- Mobile-friendly interface
+
+**🎯 Optimal Data Sizes:**
+- **Small**: 1-1,000 rows - Perfect for detailed analysis
+- **Medium**: 1,000-100,000 rows - Great for insights
+- **Large**: 100,000+ rows - Sampled for performance
+
+**🔧 Troubleshooting:**
+- Ensure CSV has proper headers
+- Check for encoding issues (UTF-8 recommended)
+- Verify data consistency
+- Remove extra commas or quotes
+
+**🌟 Pro Tips:**
+- Use descriptive column names
+- Include units in column names (e.g., 'Sales_USD')
+- Separate date and time if needed
+- Keep categorical values consistent
+- Add a 'Notes' column for context
+
+**Ready to transform your CSV data into stunning interactive dashboards! 📈✨**
+"""
+    
+    return [TextContent(type="text", text=examples)]
+
+
+@mcp.tool(description="Check the status of the Puch AI Multi-Tool Generator system")
 async def system_status() -> list[TextContent]:
     """report system status and configuration."""
-    status_info = f"""**Invoice PDF Generator System Status**
+    
+    # Get dashboard stats
+    dashboard_stats = get_dashboard_stats()
+    
+    status_info = f"""**🚀 Puch AI Multi-Tool Generator System Status**
 
-**Configuration Status:**
-- Phone Number: {'Configured' if MY_NUMBER else 'Missing MY_NUMBER'}
-- Authentication Token: {'Configured' if AUTH_TOKEN else 'Missing AUTH_TOKEN'}
+**🔧 Configuration Status:**
+- Phone Number: {'✅ Configured' if MY_NUMBER else '❌ Missing MY_NUMBER'}
+- Authentication Token: {'✅ Configured' if AUTH_TOKEN else '❌ Missing AUTH_TOKEN'}
 
-**System Information:**
+**🌐 System Information:**
 - Download Base URL: {DOWNLOAD_BASE_URL}
-- Downloads Directory: {'Available' if Path('static/downloads').exists() else 'Not Found'}
-- Active Downloads: {len(list(Path('static/downloads').glob('*.pdf')) if Path('static/downloads').exists() else [])} files
+- Downloads Directory: {'✅ Available' if Path('static/downloads').exists() else '❌ Not Found'}
+- Dashboards Directory: {'✅ Available' if Path('static/dashboards').exists() else '❌ Not Found'}
+- Active PDF Downloads: {len(list(Path('static/downloads').glob('*.pdf')) if Path('static/downloads').exists() else [])} files
+- Active Dashboards: {dashboard_stats['active_dashboards']} dashboards
 
-**Service Status:**
-- Invoice Generator: Running
-- PDF Generator: Ready
-- Download Manager: Ready
+**⚙️ Service Status:**
+- Invoice Generator: ✅ Running
+- CSV Dashboard Generator: ✅ Running
+- PDF Generator: ✅ Ready
+- Dashboard HTML Generator: ✅ Ready
+- Download Manager: ✅ Ready
 
-**Usage:**
-- Use `generate_invoice` to create professional invoice PDFs
-- Use `get_invoice_examples` for formatting examples
-- Generated invoices are automatically saved and ready for download
+**📊 Available Tools:**
 
-**Invoice Features:**
-- Professional PDF formatting
-- Company branding
-- Automatic invoice numbering
-- Tax calculations (where applicable)
-- Terms and conditions
-- Secure 24-hour download links
+**📄 Invoice Generation:**
+- `generate_invoice` - Create professional invoice PDFs
+- `get_invoice_examples` - View formatting examples
+- Features: Multi-item support, tax calculations, professional styling
 
-**Puch AI Features:**
-- Automatic bearer token authentication
-- Secure PDF generation and storage
-- Professional invoice templates
-- Fast PDF processing
+**📈 CSV Dashboard Generation:**
+- `generate_csv_dashboard` - Create interactive data dashboards
+- `get_csv_dashboard_examples` - View usage examples
+- Features: AI-powered insights, interactive charts, responsive design
+
+**🎯 Key Features:**
+- **Invoice PDFs**: Professional formatting, company branding, automatic numbering
+- **CSV Dashboards**: Interactive charts, statistical analysis, mobile-responsive
+- **Security**: Bearer token authentication, secure file storage
+- **Performance**: Fast processing, optimized for large datasets
+- **Accessibility**: 24/7 download links, cross-platform compatibility
+
+**📈 Usage Statistics:**
+- Total Dashboards Generated: {dashboard_stats['total_dashboards']}
+- Dashboard Storage Used: {dashboard_stats['total_size'] / 1024 / 1024:.1f} MB
+- System Uptime: Ready for requests
+
+**🔗 Endpoints:**
+- Downloads: {DOWNLOAD_BASE_URL}/download/[file_id]
+- Dashboards: {DOWNLOAD_BASE_URL}/dashboard/[dashboard_id]
+- Health Check: {DOWNLOAD_BASE_URL}/health
+- Statistics: {DOWNLOAD_BASE_URL}/download-stats
+
+**Ready to generate professional invoices and stunning data dashboards! 🎉**
 """
     
     return [TextContent(type="text", text=status_info)]
@@ -346,10 +588,11 @@ async def system_status() -> list[TextContent]:
 
 
 async def main() -> None:
-    """run the invoice pdf generator server."""
-    print("\n" + "=" * 60)
-    print("INVOICE PDF GENERATOR SERVER")
-    print("=" * 60)
+    """run the puch ai multi-tool generator server."""
+    print("\n" + "=" * 70)
+    print("🚀 PUCH AI MULTI-TOOL GENERATOR SERVER 🚀")
+    print("=" * 70)
+    print("📄 Invoice PDF Generation + 📊 CSV Dashboard Generation")
     
     # system status
     if MY_NUMBER:
@@ -367,6 +610,11 @@ async def main() -> None:
     downloads_dir.mkdir(parents=True, exist_ok=True)
     print(f"Downloads directory: {downloads_dir.absolute()}")
     
+    # create dashboards directory
+    dashboards_dir = Path("static/dashboards")
+    dashboards_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Dashboards directory: {dashboards_dir.absolute()}")
+    
     # add custom routes
     @mcp.custom_route(methods=["GET"], path="/download/{download_id}")
     async def download_mcp_endpoint(request):
@@ -374,6 +622,13 @@ async def main() -> None:
         path_parts = request.url.path.split('/')
         download_id = path_parts[-1]  # Get the last part of the path
         return await download_manager.serve_download(download_id)
+    
+    @mcp.custom_route(methods=["GET"], path="/dashboard/{dashboard_id}")
+    async def dashboard_mcp_endpoint(request):
+        # extract dashboard_id from url path
+        path_parts = request.url.path.split('/')
+        dashboard_id = path_parts[-1]  # Get the last part of the path
+        return await serve_dashboard(dashboard_id)
     
     @mcp.custom_route(methods=["GET"], path="/health")
     async def health_check():
