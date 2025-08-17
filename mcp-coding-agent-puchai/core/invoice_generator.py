@@ -162,7 +162,7 @@ class InvoiceGenerator:
             # Professional Header Section
             header_data = [[
                 [Paragraph(f"<b>{company_name}</b>", self.company_style)],
-                [Paragraph("INVOICE", self.title_style)]
+                [Paragraph("BILL", self.title_style)]
             ]]
             
             header_table = Table(header_data, colWidths=[4*inch, 3*inch])
@@ -185,8 +185,8 @@ class InvoiceGenerator:
             ]
             
             right_column_data = [
-                [Paragraph("<b>INVOICE DETAILS:</b>", self.section_header_style)],
-                [Paragraph(f"<b>Invoice #:</b> {invoice_number}", self.info_style)],
+                [Paragraph("<b>BILL DETAILS:</b>", self.section_header_style)],
+                [Paragraph(f"<b>BILL #:</b> {invoice_number}", self.info_style)],
                 [Paragraph(f"<b>Issue Date:</b> {date}", self.info_style)],
                 [Paragraph(f"<b>Due Date:</b> {due_date}", self.info_style)],
                 [Paragraph(f"<b>From:</b> {company_name}", self.info_style)],
