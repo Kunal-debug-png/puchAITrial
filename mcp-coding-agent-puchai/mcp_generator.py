@@ -331,21 +331,51 @@ async def generate_invoice_with_payment(
         date = datetime.now().strftime("%Y-%m-%d")
     
     try:
+        logger.info(f"[{generation_id}] Starting payment-enabled invoice generation")
+        
         # Parse and validate items
-        items_list = json.loads(items)
+        try:
+            items_list = json.loads(items)
+        except json.JSONDecodeError as e:
+            logger.error(f"[{generation_id}] JSON parsing failed: {e}")
+            raise McpError(ErrorData(
+                code=INTERNAL_ERROR,
+                message=f"Invalid JSON format for items: {str(e)}"
+            ))
+        
+        # Basic validation
+        if not items_list:
+            raise McpError(ErrorData(
+                code=INTERNAL_ERROR,
+                message="Items list cannot be empty"
+            ))
+        
+        logger.info(f"[{generation_id}] Validating {len(items_list)} items")
         
         # Calculate total amount
         total_amount = sum(item['quantity'] * item['rate'] for item in items_list)
         tax_amount = total_amount * tax_rate
         final_total = total_amount + tax_amount
         
-        # Create payment link
-        payment_info = payment_processor.create_payment_link(
-            invoice_id=generation_id,
-            amount=final_total,
-            currency=currency_symbol,
-            customer_email=buyer_email
-        )
+        logger.info(f"[{generation_id}] Calculated total: {currency_symbol}{final_total:.2f}")
+        
+        # Create payment link with error handling
+        payment_info = None
+        try:
+            payment_info = payment_processor.create_payment_link(
+                invoice_id=generation_id,
+                amount=final_total,
+                currency=currency_symbol,
+                customer_email=buyer_email
+            )
+            logger.info(f"[{generation_id}] Payment link created successfully")
+        except Exception as e:
+            logger.error(f"[{generation_id}] Failed to create payment link: {e}")
+            # Continue without payment link but log the error
+            payment_info = {
+                "payment_url": "",
+                "available_methods": ["Manual Payment"]
+            }
         
         # Generate invoice with payment integration
         pdf_data = await invoice_generator.generate_invoice_with_payment(

@@ -164,53 +164,78 @@ class PaymentProcessor:
         payment_methods: List[str] = None
     ) -> Dict:
         """Create a payment link for an invoice."""
-        if payment_methods is None:
-            payment_methods = ["card", "upi", "paypal"]
-        
-        # Create transaction
-        transaction = PaymentTransaction(
-            invoice_id=invoice_id,
-            amount=amount,
-            currency=currency,
-            customer_email=customer_email
-        )
-        
-        # Create payment URL
-        payment_url = f"{self.base_url}/payment/{transaction.transaction_id}"
-        transaction.payment_url = payment_url
-        
-        # Store transaction
-        self.transactions[transaction.transaction_id] = transaction
-        
-        # Update invoice with payment info
-        if invoice_id not in self.invoices:
-            self.invoices[invoice_id] = {
-                "invoice_id": invoice_id,
-                "status": "draft",
+        try:
+            # Validate inputs
+            if not invoice_id or not invoice_id.strip():
+                raise ValueError("Invoice ID cannot be empty")
+            
+            if amount <= 0:
+                raise ValueError("Amount must be greater than zero")
+            
+            if not currency:
+                currency = "₹"  # Default currency
+            
+            if payment_methods is None:
+                payment_methods = ["card", "upi", "paypal"]
+            
+            logger.info(f"Creating payment link for invoice {invoice_id}, amount: {currency}{amount:.2f}")
+            
+            # Create transaction
+            transaction = PaymentTransaction(
+                invoice_id=invoice_id,
+                amount=amount,
+                currency=currency,
+                customer_email=customer_email
+            )
+            
+            # Create payment URL
+            payment_url = f"{self.base_url}/payment/{transaction.transaction_id}"
+            transaction.payment_url = payment_url
+            
+            # Store transaction
+            self.transactions[transaction.transaction_id] = transaction
+            
+            # Update invoice with payment info
+            if invoice_id not in self.invoices:
+                self.invoices[invoice_id] = {
+                    "invoice_id": invoice_id,
+                    "status": "draft",
+                    "amount": amount,
+                    "currency": currency,
+                    "created_at": datetime.now().isoformat()
+                }
+            
+            self.invoices[invoice_id]["payment_link"] = payment_url
+            self.invoices[invoice_id]["transaction_id"] = transaction.transaction_id
+            self.invoices[invoice_id]["status"] = "pending_payment"
+            
+            # Save data with error handling
+            try:
+                self.save_data()
+            except Exception as save_error:
+                logger.error(f"Failed to save payment data: {save_error}")
+                # Remove transaction from memory if save failed
+                if transaction.transaction_id in self.transactions:
+                    del self.transactions[transaction.transaction_id]
+                raise
+            
+            logger.info(f"Created payment link for invoice {invoice_id}: {payment_url}")
+            
+            return {
+                "transaction_id": transaction.transaction_id,
+                "payment_url": payment_url,
                 "amount": amount,
                 "currency": currency,
-                "created_at": datetime.now().isoformat()
+                "available_methods": [
+                    self.payment_methods[method].name 
+                    for method in payment_methods 
+                    if method in self.payment_methods
+                ]
             }
-        
-        self.invoices[invoice_id]["payment_link"] = payment_url
-        self.invoices[invoice_id]["transaction_id"] = transaction.transaction_id
-        self.invoices[invoice_id]["status"] = "pending_payment"
-        
-        self.save_data()
-        
-        logger.info(f"Created payment link for invoice {invoice_id}: {payment_url}")
-        
-        return {
-            "transaction_id": transaction.transaction_id,
-            "payment_url": payment_url,
-            "amount": amount,
-            "currency": currency,
-            "available_methods": [
-                self.payment_methods[method].name 
-                for method in payment_methods 
-                if method in self.payment_methods
-            ]
-        }
+            
+        except Exception as e:
+            logger.error(f"Failed to create payment link for invoice {invoice_id}: {e}")
+            raise ValueError(f"Payment link creation failed: {str(e)}")
     
     def generate_payment_qr(self, transaction_id: str) -> Optional[bytes]:
         """Generate QR code for payment."""
