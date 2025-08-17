@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import json
+import traceback
 from datetime import datetime, timedelta
 from typing import Annotated, Optional
 from pathlib import Path
@@ -20,7 +21,6 @@ from pydantic import Field
 
 from core.invoice_generator import InvoiceGenerator
 from core.payment_processor import PaymentProcessor
-from core.email_automation import EmailManager
 from utils.pdf_creator import create_invoice_pdf
 from utils.download_manager import DownloadManager
 from fastapi import FastAPI
@@ -63,13 +63,6 @@ mcp = FastMCP("Invoice PDF Generator")
 invoice_generator = InvoiceGenerator()
 download_manager = DownloadManager()
 payment_processor = PaymentProcessor(base_url=DOWNLOAD_BASE_URL)
-email_manager = EmailManager(
-    from_name="Invoice System",
-    # Use demo mode if SMTP credentials are not configured
-    username=get_env_var("SMTP_USERNAME", ""),
-    password=get_env_var("SMTP_PASSWORD", ""),
-    from_email=get_env_var("FROM_EMAIL", "")
-)
 
 
 @mcp.tool
@@ -96,9 +89,16 @@ async def generate_invoice(
     start_time = datetime.now()
     generation_id = f"inv_{int(start_time.timestamp())}"
     
+    logger.info(f"[MCP_TOOL] generate_invoice called via MCP")
+    logger.info(f"[MCP_TOOL] Parameters: buyer={buyer_name}, company={company_name}")
+    logger.info(f"[MCP_TOOL] Items JSON: {items}")
+    logger.info(f"[MCP_TOOL] Generation ID: {generation_id}")
+    
     # use current date if not provided
     if date is None:
         date = datetime.now().strftime("%Y-%m-%d")
+    
+    logger.debug(f"[MCP_TOOL] Using date: {date}, tax_rate: {tax_rate}, currency: {currency_symbol}")
     
     # progress logging
     def log_progress(message: str):
@@ -185,6 +185,9 @@ async def generate_invoice(
         
         log_progress("Creating downloadable PDF package...")
         
+        logger.info(f"[MCP_TOOL] About to call create_invoice_pdf with {len(pdf_data)} bytes")
+        logger.debug(f"[MCP_TOOL] PDF creation args: buyer={buyer_name}, company={company_name}, amount={total_amount}")
+        
         # save pdf and get download url
         download_url = await create_invoice_pdf(
             pdf_data=pdf_data,
@@ -194,6 +197,8 @@ async def generate_invoice(
             date=date,
             generation_id=generation_id
         )
+        
+        logger.info(f"[MCP_TOOL] create_invoice_pdf returned: {download_url}")
         
         # track generation metrics
         generation_time = (datetime.now() - start_time).total_seconds()
@@ -207,40 +212,31 @@ async def generate_invoice(
         tax_amount = subtotal * tax_rate
         final_total = subtotal + tax_amount
         
-        success_message = f"""**Invoice PDF Generated Successfully!**
-
-**Invoice Details:**
-- Company: {company_name}
-- Buyer: {buyer_name}
-- Items ({len(items_list)} items):
-{items_display}
-- Subtotal: {currency_symbol}{subtotal:,.2f}
-- {tax_display}
-- Tax Amount: {currency_symbol}{tax_amount:,.2f}
-- Total Amount: {currency_symbol}{final_total:,.2f}
-- Currency: {currency_symbol}
-- Date: {date}
-- Generation ID: {generation_id}
-
-**Download Your Invoice**: {download_url}
-**Link Expires**: 24 hours
-**Generation Time**: {generation_time:.1f} seconds
-
-**Invoice Features:**
-- Professional PDF format
-- Multiple line items support
-- Company branding
-- Automatic calculations
-- Flexible tax calculations
-- Customizable currency symbols
-- Terms and conditions
-
-Your professional invoice is ready for download!"""
+        logger.info(f"[MCP_TOOL] Preparing success response with download URL: {download_url}")
         
+        success_message = f"""✅ **Invoice Generated Successfully!**
+
+📋 **Details:**
+• Company: {company_name}
+• Buyer: {buyer_name} 
+• Items: {len(items_list)} items
+• Total: {currency_symbol}{final_total:,.2f}
+• Date: {date}
+
+📎 **Download Link:** {download_url}
+⏰ **Expires:** 24 hours
+⚡ **Generated in:** {generation_time:.1f}s
+
+Your professional invoice PDF is ready for download!"""
+        
+        logger.info(f"[MCP_TOOL] Returning success response with {len(success_message)} characters")
+        
+        logger.info(f"[MCP_TOOL] Successfully generated invoice, returning TextContent")
         return [TextContent(type="text", text=success_message)]
         
     except Exception as e:
-        logger.error(f"[{generation_id}] Generation failed: {str(e)}")
+        logger.error(f"[MCP_TOOL] [{generation_id}] Generation failed: {str(e)}")
+        logger.error(f"[MCP_TOOL] Full exception: {traceback.format_exc()}")
         raise McpError(ErrorData(
             code=INTERNAL_ERROR,
             message=f"Invoice generation failed: {str(e)}"
@@ -316,13 +312,11 @@ async def generate_invoice_with_payment(
     buyer_name: Annotated[str, Field(description="Name of the buyer/client")],
     company_name: Annotated[str, Field(description="Company name issuing the invoice")],
     items: Annotated[str, Field(description="JSON string of items: [{\"name\": \"Item 1\", \"quantity\": 2, \"rate\": 100.00}]")],
-    buyer_email: Annotated[str, Field(description="Buyer's email address for payment notifications")] = "",
     date: Annotated[str, Field(description="Invoice date in YYYY-MM-DD format")] = None,
     tax_rate: Annotated[float, Field(description="Tax rate as decimal (e.g., 0.18 for 18%)")] = 0.0,
-    currency_symbol: Annotated[str, Field(description="Currency symbol")] = "₹",
-    enable_email: Annotated[bool, Field(description="Send invoice via email automatically")] = True
+    currency_symbol: Annotated[str, Field(description="Currency symbol")] = "₹"
 ) -> list[TextContent]:
-    """Generate an invoice with payment integration and optional email delivery."""
+    """Generate an invoice with payment integration."""
     start_time = datetime.now()
     generation_id = f"inv_{int(start_time.timestamp())}"
     
@@ -359,23 +353,48 @@ async def generate_invoice_with_payment(
         
         logger.info(f"[{generation_id}] Calculated total: {currency_symbol}{final_total:.2f}")
         
-        # Create payment link with error handling
-        payment_info = None
+        # Create payment link with improved error handling
+        payment_info = {
+            "payment_url": "",
+            "available_methods": ["Manual Payment"],
+            "error": None
+        }
+        
         try:
-            payment_info = payment_processor.create_payment_link(
+            logger.info(f"[{generation_id}] Attempting to create payment link for amount: {currency_symbol}{final_total:.2f}")
+            
+            # Validate payment processor configuration
+            if not payment_processor:
+                raise ValueError("Payment processor not initialized")
+                
+            if not hasattr(payment_processor, 'base_url') or not payment_processor.base_url:
+                raise ValueError("Payment processor base URL not configured")
+            
+            # Create payment link
+            payment_result = payment_processor.create_payment_link(
                 invoice_id=generation_id,
                 amount=final_total,
-                currency=currency_symbol,
-                customer_email=buyer_email
+                currency=currency_symbol
             )
-            logger.info(f"[{generation_id}] Payment link created successfully")
-        except Exception as e:
-            logger.error(f"[{generation_id}] Failed to create payment link: {e}")
-            # Continue without payment link but log the error
+            
+            # Update payment info with successful result
             payment_info = {
-                "payment_url": "",
-                "available_methods": ["Manual Payment"]
+                "payment_url": payment_result.get("payment_url", ""),
+                "available_methods": payment_result.get("available_methods", ["Card", "UPI", "PayPal"]),
+                "transaction_id": payment_result.get("transaction_id", ""),
+                "error": None
             }
+            
+            logger.info(f"[{generation_id}] Payment link created successfully: {payment_info['payment_url']}")
+            
+        except Exception as e:
+            error_msg = f"Payment system error: {str(e)}"
+            logger.warning(f"[{generation_id}] {error_msg}")
+            logger.debug(f"[{generation_id}] Payment creation error details: {traceback.format_exc()}")
+            
+            # Set error info but continue with invoice generation
+            payment_info["error"] = error_msg
+            # Keep default values for payment_url (empty) and manual payment methods
         
         # Generate invoice with payment integration
         pdf_data = await invoice_generator.generate_invoice_with_payment(
@@ -386,8 +405,7 @@ async def generate_invoice_with_payment(
             generation_id=generation_id,
             payment_url=payment_info["payment_url"],
             tax_rate=tax_rate,
-            currency_symbol=currency_symbol,
-            buyer_email=buyer_email
+            currency_symbol=currency_symbol
         )
         
         # Save PDF and get download URL
@@ -400,26 +418,6 @@ async def generate_invoice_with_payment(
             generation_id=generation_id
         )
         
-        # Send email if enabled and email provided
-        email_result = None
-        if enable_email and buyer_email:
-            invoice_data = {
-                "buyer_name": buyer_name,
-                "company_name": company_name,
-                "invoice_number": payment_processor._generate_invoice_number(generation_id) if hasattr(payment_processor, '_generate_invoice_number') else f"INV-{generation_id.split('_')[1]}",
-                "date": date,
-                "total_amount": final_total,
-                "currency": currency_symbol,
-                "due_date": (datetime.strptime(date, "%Y-%m-%d") + datetime.timedelta(days=30)).strftime("%Y-%m-%d"),
-                "payment_link": payment_info["payment_url"],
-                "invoice_id": generation_id
-            }
-            
-            email_result = await email_manager.send_invoice_email(
-                to_email=buyer_email,
-                invoice_data=invoice_data,
-                pdf_attachment=pdf_data
-            )
         
         # Generation time
         generation_time = (datetime.now() - start_time).total_seconds()
@@ -427,41 +425,58 @@ async def generate_invoice_with_payment(
         # Format response
         items_display = "\n".join([f"- {item['name']}: {item['quantity']} x {currency_symbol}{item['rate']:.2f}" for item in items_list])
         
-        success_message = f"""**Payment-Enabled Invoice Generated Successfully!** 💳
-
-**Invoice Details:**
-- Company: {company_name}
-- Buyer: {buyer_name}
-- Email: {buyer_email if buyer_email else "Not provided"}
-- Items ({len(items_list)} items):
-{items_display}
-- Subtotal: {currency_symbol}{total_amount:,.2f}
-- Tax ({tax_rate*100:.0f}%): {currency_symbol}{tax_amount:,.2f}
-- **Total Amount: {currency_symbol}{final_total:,.2f}**
-- Date: {date}
-- Invoice ID: {generation_id}
-
-**Payment Integration:**
+        # Check if payment link was successfully created
+        has_payment_link = payment_info["payment_url"] and payment_info["payment_url"].strip()
+        
+        if has_payment_link:
+            payment_section = f"""**Payment Integration:**
 🔗 **Payment Link:** {payment_info["payment_url"]}
 📱 **QR Code:** Embedded in PDF for mobile payments
 💳 **Payment Methods:** {', '.join(payment_info["available_methods"])}
-⏰ **Payment Status:** Pending
-
-**Downloads & Delivery:**
-📎 **Download PDF:** {download_url}
-{f'📧 **Email Status:** {"Sent successfully" if email_result and email_result.get("success") else "Failed to send" if email_result else "Not sent"}' if buyer_email else ''}
-⏳ **Link Expires:** 24 hours
-⏱️ **Generation Time:** {generation_time:.1f} seconds
-
-**New Features:**
+⏰ **Payment Status:** Pending"""
+            
+            features_section = """**Features:**
 - ✅ Payment-enabled PDF with QR codes
 - ✅ Clickable payment buttons
 - ✅ Multiple payment methods
-- ✅ Automatic email delivery
 - ✅ Payment status tracking
 - ✅ Professional invoice design
 
 Customers can now pay instantly by scanning the QR code or clicking the payment link!"""
+        else:
+            payment_section = f"""**Payment Integration:**
+⚠️ **Payment Link:** Not available (payment system temporarily unavailable)
+📄 **Invoice PDF:** Contains payment instructions for manual processing
+💳 **Payment Methods:** {', '.join(payment_info["available_methods"])}
+⏰ **Payment Status:** Pending (Manual processing required)"""
+            
+            features_section = """**Features:**
+- ✅ Professional invoice PDF generated
+- ✅ Payment instructions included in PDF
+- ✅ Manual payment processing available
+- ✅ Invoice tracking and management
+- ⚠️ Automatic payment processing temporarily unavailable
+
+Customers can process payment manually using the instructions in the PDF."""
+        
+        success_message = f"""✅ **Payment-Enabled Invoice Generated Successfully!**
+
+📋 **Invoice Details:**
+• Company: {company_name}
+• Buyer: {buyer_name}
+• Items: {len(items_list)} items
+• Total: {currency_symbol}{final_total:,.2f}
+• Date: {date}
+
+📎 **Download Link:** {download_url}
+⏰ **Expires:** 24 hours
+⚡ **Generated in:** {generation_time:.1f}s
+
+{payment_section}
+
+{features_section}
+
+Your payment-enabled invoice PDF is ready for download!"""
         
         return [TextContent(type="text", text=success_message)]
         
@@ -488,26 +503,6 @@ async def process_dummy_payment(
         )
         
         if result["success"]:
-            # Send payment confirmation email if customer email is available
-            transaction = payment_processor.get_transaction_status(transaction_id)
-            if transaction and transaction.get("customer_email"):
-                payment_data = {
-                    "customer_name": "Valued Customer",  # Could be enhanced with actual customer data
-                    "company_name": "Invoice System",
-                    "invoice_number": f"INV-{transaction['invoice_id'].split('_')[1] if '_' in transaction['invoice_id'] else transaction['invoice_id']}",
-                    "amount": transaction["amount"],
-                    "currency": transaction["currency"],
-                    "payment_method": payment_method.title(),
-                    "confirmation_code": result.get("confirmation_code", "N/A"),
-                    "payment_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "transaction_id": transaction_id
-                }
-                
-                email_result = await email_manager.send_payment_confirmation(
-                    to_email=transaction["customer_email"],
-                    payment_data=payment_data
-                )
-            
             message = f"""**✅ Payment Processed Successfully!**
 
 **Payment Details:**
@@ -518,7 +513,6 @@ async def process_dummy_payment(
 - Message: {result["message"]}
 
 **Next Steps:**
-- Payment confirmation email sent to customer
 - Invoice marked as PAID
 - Transaction recorded in system
 
@@ -591,84 +585,15 @@ async def get_payment_status(
         ))
 
 
-@mcp.tool(description="Send invoice via email")
-async def send_invoice_email(
-    to_email: Annotated[str, Field(description="Recipient email address")],
-    invoice_id: Annotated[str, Field(description="Invoice ID to send")],
-    include_payment_link: Annotated[bool, Field(description="Include payment link in email")] = True
-) -> list[TextContent]:
-    """Send an existing invoice via email with optional payment link."""
-    try:
-        # This would need to be enhanced to get actual invoice data from storage
-        # For now, we'll create a basic invoice data structure
-        invoice_data = {
-            "buyer_name": "Valued Customer",
-            "company_name": "Invoice System",
-            "invoice_number": f"INV-{invoice_id.split('_')[1] if '_' in invoice_id else invoice_id}",
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "total_amount": 1000.00,  # This would come from actual invoice data
-            "currency": "₹",
-            "due_date": (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d"),
-            "payment_link": f"{DOWNLOAD_BASE_URL}/payment/{invoice_id}" if include_payment_link else "",
-            "invoice_id": invoice_id
-        }
-        
-        result = await email_manager.send_invoice_email(
-            to_email=to_email,
-            invoice_data=invoice_data,
-            pdf_attachment=None  # Would attach actual PDF in real implementation
-        )
-        
-        if result["success"]:
-            message = f"""**✅ Invoice Email Sent Successfully!**
-
-**Email Details:**
-- Recipient: {to_email}
-- Invoice: {invoice_data['invoice_number']}
-- Amount: {invoice_data['currency']}{invoice_data['total_amount']:,.2f}
-- Payment Link: {'Included' if include_payment_link else 'Not included'}
-
-**Email Features:**
-- Professional HTML template
-- Invoice PDF attachment
-- Payment instructions
-- Mobile-friendly design
-
-{f"Demo Mode: {result.get('demo_mode', False)}" if result.get('demo_mode') else ""}
-✅ **Email delivered successfully!**"""
-        else:
-            message = f"""**❌ Email Delivery Failed**
-
-**Error Details:**
-- Recipient: {to_email}
-- Invoice: {invoice_data['invoice_number']}
-- Error: {result['error']}
-
-**Troubleshooting:**
-- Check email address format
-- Verify SMTP configuration
-- Check internet connection
-
-😔 **Please try again or check configuration.**"""
-        
-        return [TextContent(type="text", text=message)]
-        
-    except Exception as e:
-        logger.error(f"Failed to send invoice email: {e}")
-        raise McpError(ErrorData(
-            code=INTERNAL_ERROR,
-            message=f"Failed to send email: {str(e)}"
-        ))
 
 
-@mcp.tool(description="Get payment and email analytics")
+@mcp.tool(description="Get payment analytics")
 async def get_system_analytics(
     days: Annotated[int, Field(description="Number of days to analyze (default: 30)")] = 30
 ) -> list[TextContent]:
-    """Get comprehensive analytics for payments and email delivery."""
+    """Get comprehensive analytics for payment processing."""
     try:
         payment_analytics = payment_processor.get_payment_analytics(days=days)
-        email_analytics = email_manager.get_email_stats(days=days)
         
         analytics_message = f"""**System Analytics Report** 📊
 
@@ -683,21 +608,11 @@ async def get_system_analytics(
 **Payment Methods:**
 {chr(10).join([f"- {method.title()}: {count} transactions" for method, count in payment_analytics['payment_methods'].items()]) if payment_analytics['payment_methods'] else "- No payment method data"}
 
-**Email Analytics ({days} days):**
-- Total Emails Sent: {email_analytics['total_sent']}
-- Successful Deliveries: {email_analytics['successful_sent']}
-- Failed Deliveries: {email_analytics['failed_sent']}
-- Delivery Success Rate: {email_analytics['success_rate']}%
-
-**Email Templates Used:**
-{chr(10).join([f"- {template_id.replace('_', ' ').title()}: {count} emails" for template_id, count in email_analytics['template_usage'].items()]) if email_analytics['template_usage'] else "- No template usage data"}
-
 **Performance Insights:**
 - Payment processing is {'performing well' if payment_analytics['success_rate'] > 90 else 'needs attention'}
-- Email delivery is {'performing well' if email_analytics['success_rate'] > 95 else 'needs attention'}
 - Peak activity: {max(payment_analytics['daily_amounts'].items(), key=lambda x: x[1])[0] if payment_analytics['daily_amounts'] else 'No data'}
 
-📊 **System operating efficiently!**"""
+📊 **Payment system operating efficiently!**"""
         
         return [TextContent(type="text", text=analytics_message)]
         
@@ -715,14 +630,12 @@ async def system_status() -> list[TextContent]:
     try:
         # Get system stats
         payment_stats = payment_processor.get_payment_analytics(days=7)  # Last 7 days
-        email_stats = email_manager.get_email_stats(days=7)  # Last 7 days
         
         status_info = f"""**Invoice PDF Generator System Status** 🗺️
 
 **Configuration Status:**
 - Phone Number: {'Configured' if MY_NUMBER else 'Missing MY_NUMBER'}
 - Authentication Token: {'Configured' if AUTH_TOKEN else 'Missing AUTH_TOKEN'}
-- SMTP Email: {'Configured' if email_manager.username else 'Demo Mode (No SMTP)'}
 
 **System Information:**
 - Download Base URL: {DOWNLOAD_BASE_URL}
@@ -735,33 +648,29 @@ async def system_status() -> list[TextContent]:
 - ✅ PDF Generator: Ready
 - ✅ Download Manager: Ready
 - ✅ Payment Processor: Ready
-- ✅ Email Manager: Ready
 
 **Recent Activity (7 days):**
 - Payment Transactions: {payment_stats['total_transactions']}
-- Emails Sent: {email_stats['total_sent']}
-- Success Rates: {payment_stats['success_rate']}% payments, {email_stats['success_rate']}% emails
+- Payment Success Rate: {payment_stats['success_rate']}%
 
 **Available Tools:**
 - 📎 `generate_invoice` - Basic invoice generation
 - 💳 `generate_invoice_with_payment` - Payment-enabled invoices
 - ⏯️ `process_dummy_payment` - Test payment processing
 - 📊 `get_payment_status` - Check payment status
-- 📧 `send_invoice_email` - Email invoice delivery
-- 📊 `get_system_analytics` - System analytics
+- 📊 `get_system_analytics` - Payment analytics
 - 📜 `get_invoice_examples` - Usage examples
 
-**New Features:**
+**Features:**
 - ✨ QR code payment integration
 - ✨ Multiple payment methods
-- ✨ Automated email delivery
 - ✨ Payment status tracking
-- ✨ Professional email templates
+- ✨ Professional invoice design
 - ✨ System analytics
 
-**System Health:** {'Excellent' if payment_stats['success_rate'] > 90 and email_stats['success_rate'] > 95 else 'Good' if payment_stats['success_rate'] > 80 and email_stats['success_rate'] > 80 else 'Needs Attention'} ✅
+**System Health:** {'Excellent' if payment_stats['success_rate'] > 90 else 'Good' if payment_stats['success_rate'] > 80 else 'Needs Attention'} ✅
 
-🚀 **Enhanced invoice system with payment integration ready!**"""
+🚀 **Invoice system with payment integration ready!**"""
         
         return [TextContent(type="text", text=status_info)]
         
@@ -783,11 +692,10 @@ async def system_status() -> list[TextContent]:
 - PDF Generator: Ready
 - Download Manager: Ready
 - Payment Processor: Ready
-- Email Manager: Ready
 
 **Usage:**
 - Use available tools to create and manage invoices
-- Enhanced with payment and email features
+- Enhanced with payment features
 
 **System Health:** Good ✅"""
         
@@ -824,10 +732,21 @@ async def main() -> None:
         # extract download_id from url path
         path_parts = request.url.path.split('/')
         download_id = path_parts[-1]  # Get the last part of the path
-        return await download_manager.serve_download(download_id)
+        logger.info(f"[ROUTE] Download request received: {download_id}")
+        logger.debug(f"[ROUTE] Full URL path: {request.url.path}")
+        logger.debug(f"[ROUTE] Request headers: {dict(request.headers)}")
+        try:
+            result = await download_manager.serve_download(download_id)
+            logger.info(f"[ROUTE] Download served successfully: {download_id}")
+            return result
+        except Exception as e:
+            logger.error(f"[ROUTE] Download failed for {download_id}: {str(e)}")
+            logger.error(f"[ROUTE] Exception details: {traceback.format_exc()}")
+            raise
     
     @mcp.custom_route(methods=["GET"], path="/health")
     async def health_check():
+        logger.debug(f"[ROUTE] Health check requested")
         return {
             "status": "healthy",
             "service": "Invoice PDF Generator",
@@ -836,19 +755,26 @@ async def main() -> None:
     
     @mcp.custom_route(methods=["GET"], path="/download-stats")
     async def download_stats():
-        from utils.zip_creator import get_download_stats
-        from utils.pdf_creator import get_pdf_download_stats
-        
-        zip_stats = get_download_stats()
-        pdf_stats = get_pdf_download_stats()
-        
-        return {
-            "zip_files": zip_stats,
-            "pdf_files": pdf_stats,
-            "total_files": zip_stats["total_downloads"] + pdf_stats["total_pdfs"],
-            "total_size": zip_stats["total_size"] + pdf_stats["total_size"],
-            "total_active": zip_stats["active_downloads"] + pdf_stats["active_pdfs"]
-        }
+        logger.debug(f"[ROUTE] Download stats requested")
+        try:
+            from utils.zip_creator import get_download_stats
+            from utils.pdf_creator import get_pdf_download_stats
+            
+            zip_stats = get_download_stats()
+            pdf_stats = get_pdf_download_stats()
+            
+            stats = {
+                "zip_files": zip_stats,
+                "pdf_files": pdf_stats,
+                "total_files": zip_stats["total_downloads"] + pdf_stats["total_pdfs"],
+                "total_size": zip_stats["total_size"] + pdf_stats["total_size"],
+                "total_active": zip_stats["active_downloads"] + pdf_stats["active_pdfs"]
+            }
+            logger.info(f"[ROUTE] Download stats: {stats['total_files']} files, {stats['total_active']} active")
+            return stats
+        except Exception as e:
+            logger.error(f"[ROUTE] Failed to get download stats: {e}")
+            raise
     
     print("=" * 60)
     print(f"Server: {DOWNLOAD_BASE_URL}")

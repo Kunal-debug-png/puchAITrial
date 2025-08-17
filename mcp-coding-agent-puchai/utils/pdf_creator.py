@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import time
+import traceback
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict
@@ -26,25 +27,42 @@ async def create_invoice_pdf(
     generation_id: str
 ) -> str:
     """create a downloadable pdf package containing the generated invoice."""
+    logger.info(f"[PDF_CREATOR] Starting PDF creation for generation: {generation_id}")
+    logger.debug(f"[PDF_CREATOR] Input - buyer: {buyer_name}, company: {company_name}, amount: {amount}, date: {date}")
+    logger.debug(f"[PDF_CREATOR] PDF data size: {len(pdf_data):,} bytes")
+    
     # ensure downloads directory exists
     downloads_dir = Path("static/downloads")
     downloads_dir.mkdir(parents=True, exist_ok=True)
+    logger.debug(f"[PDF_CREATOR] Downloads directory: {downloads_dir.absolute()} (exists: {downloads_dir.exists()})")
     
     # generate unique download id
     download_id = _generate_download_id(buyer_name, company_name, generation_id)
     pdf_filename = f"invoice_{download_id}.pdf"
     pdf_path = downloads_dir / pdf_filename
     
-    logger.info(f"[{generation_id}] creating pdf package: {pdf_filename}")
+    logger.info(f"[PDF_CREATOR] Generated download ID: {download_id}")
+    logger.info(f"[PDF_CREATOR] Creating PDF package: {pdf_filename}")
+    logger.debug(f"[PDF_CREATOR] Full PDF path: {pdf_path.absolute()}")
     
     try:
         # save pdf file
+        logger.debug(f"[PDF_CREATOR] Writing PDF file to: {pdf_path}")
         with open(pdf_path, 'wb') as f:
             f.write(pdf_data)
         
-        logger.debug(f"[{generation_id}] saved invoice PDF ({len(pdf_data)} bytes)")
+        # verify file was written correctly
+        if pdf_path.exists():
+            actual_size = pdf_path.stat().st_size
+            logger.info(f"[PDF_CREATOR] PDF file saved successfully: {actual_size:,} bytes")
+            if actual_size != len(pdf_data):
+                logger.warning(f"[PDF_CREATOR] Size mismatch: expected {len(pdf_data):,}, got {actual_size:,}")
+        else:
+            logger.error(f"[PDF_CREATOR] PDF file not found after write operation!")
+            raise Exception("Failed to save PDF file")
         
         # create download record
+        logger.debug(f"[PDF_CREATOR] Creating download record")
         download_record = {
             "id": download_id,
             "generation_id": generation_id,
@@ -59,25 +77,48 @@ async def create_invoice_pdf(
             "invoice_number": f"INV-{generation_id.split('_')[1] if '_' in generation_id else generation_id}",
             "type": "invoice_pdf"
         }
+        logger.debug(f"[PDF_CREATOR] Record data: {download_record}")
         
         # save download record
         record_path = downloads_dir / f"{download_id}.json"
+        logger.debug(f"[PDF_CREATOR] Saving record to: {record_path}")
         with open(record_path, 'w') as f:
             json.dump(download_record, f, indent=2)
+        
+        # verify record was saved
+        if record_path.exists():
+            logger.debug(f"[PDF_CREATOR] Record file saved successfully: {record_path.stat().st_size} bytes")
+        else:
+            logger.error(f"[PDF_CREATOR] Record file not found after write operation!")
+            raise Exception("Failed to save download record")
         
         # construct download url (prefer .env, fallback system env)
         env_vars = dotenv_values(".env")
         base_url = env_vars.get("DOWNLOAD_BASE_URL") or os.environ.get("DOWNLOAD_BASE_URL", "http://localhost:8086")
         download_url = f"{base_url}/download/{download_id}"
         
-        logger.info(f"[{generation_id}] pdf package created: {pdf_path.stat().st_size:,} bytes")
+        logger.info(f"[PDF_CREATOR] PDF package created successfully:")
+        logger.info(f"[PDF_CREATOR]   - File: {pdf_path.name} ({pdf_path.stat().st_size:,} bytes)")
+        logger.info(f"[PDF_CREATOR]   - Record: {record_path.name}")
+        logger.info(f"[PDF_CREATOR]   - Download URL: {download_url}")
+        logger.info(f"[PDF_CREATOR]   - Download ID: {download_id}")
+        
         return download_url
         
     except Exception as e:
-        logger.error(f"[{generation_id}] failed to create pdf package: {e}")
+        logger.error(f"[PDF_CREATOR] Failed to create PDF package: {e}")
+        logger.error(f"[PDF_CREATOR] Exception details: {traceback.format_exc()}")
         # clean up partial files
-        if pdf_path.exists():
-            pdf_path.unlink()
+        try:
+            if pdf_path.exists():
+                pdf_path.unlink()
+                logger.debug(f"[PDF_CREATOR] Cleaned up partial PDF file: {pdf_path}")
+            record_path = downloads_dir / f"{download_id}.json"
+            if record_path.exists():
+                record_path.unlink()
+                logger.debug(f"[PDF_CREATOR] Cleaned up partial record file: {record_path}")
+        except Exception as cleanup_error:
+            logger.warning(f"[PDF_CREATOR] Failed to clean up partial files: {cleanup_error}")
         raise
 
 
@@ -85,7 +126,9 @@ def _generate_download_id(buyer_name: str, company_name: str, generation_id: str
     """generate a unique download id."""
     # Create a hash from buyer, company, generation ID, and current time
     content = f"{buyer_name}{company_name}{generation_id}{time.time()}".encode()
-    return hashlib.sha256(content).hexdigest()[:16]
+    download_id = hashlib.sha256(content).hexdigest()[:16]
+    logger.debug(f"[PDF_CREATOR] Generated download ID: {download_id} from content hash")
+    return download_id
 
 
 def cleanup_expired_pdf_downloads(max_age_hours: int = 24) -> int:

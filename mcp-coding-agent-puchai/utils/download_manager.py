@@ -6,6 +6,7 @@ manages download links, expiration, and cleanup for generated mcp packages.
 
 import json
 import logging
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
@@ -48,38 +49,46 @@ class DownloadManager:
     
     async def serve_download(self, download_id: str) -> FileResponse:
         """serve a download file if it exists and hasn't expired."""
-        logger.info(f"Download request for ID: {download_id}")
+        logger.info(f"[DOWNLOAD] Request for ID: {download_id}")
         
         # check if download record exists
         record_path = self.downloads_dir / f"{download_id}.json"
+        logger.debug(f"[DOWNLOAD] Looking for record at: {record_path} (exists: {record_path.exists()})")
         if not record_path.exists():
-            logger.warning(f"Download record not found: {download_id}")
-            logger.debug(f"Looking for record at: {record_path}")
+            logger.warning(f"[DOWNLOAD] Record not found: {download_id}")
             # List available downloads for debugging
             available = list(self.downloads_dir.glob("*.json"))
-            logger.debug(f"Available download records: {[f.stem for f in available]}")
+            logger.warning(f"[DOWNLOAD] Available download records: {[f.stem for f in available]}")
             raise HTTPException(status_code=404, detail="Download not found")
         
         # load download record
         try:
+            logger.debug(f"[DOWNLOAD] Reading record file: {record_path}")
             with open(record_path) as f:
                 record = json.load(f)
+            logger.debug(f"[DOWNLOAD] Record loaded successfully: {record.get('type', 'unknown type')}")
         except Exception as e:
-            logger.error(f"Failed to read download record {download_id}: {e}")
+            logger.error(f"[DOWNLOAD] Failed to read record {download_id}: {e}")
+            logger.error(f"[DOWNLOAD] Exception details: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail="Download record corrupted")
         
         # check if download has expired
         expires_at = datetime.fromisoformat(record["expires_at"])
-        if datetime.now() > expires_at:
-            logger.warning(f"Download expired: {download_id}")
+        current_time = datetime.now()
+        logger.debug(f"[DOWNLOAD] Expiration check: current={current_time.isoformat()}, expires={expires_at.isoformat()}")
+        if current_time > expires_at:
+            logger.warning(f"[DOWNLOAD] Expired: {download_id} (expired {(current_time - expires_at).total_seconds()/60:.1f} minutes ago)")
             # Clean up expired files
             self._cleanup_expired_download(download_id, record)
             raise HTTPException(status_code=410, detail="Download has expired")
+        else:
+            logger.debug(f"[DOWNLOAD] Valid: expires in {(expires_at - current_time).total_seconds()/60:.1f} minutes")
         
         # check if file exists (could be ZIP or PDF)
         file_path = None
         media_type = "application/octet-stream"
         content_description = "Generated File"
+        download_filename = None
         
         # Handle different file types
         if record.get("type") == "invoice_pdf":
@@ -89,11 +98,14 @@ class DownloadManager:
             media_type = "application/pdf"
             content_description = "Generated Invoice PDF"
             
+            logger.debug(f"[DOWNLOAD] PDF file: {pdf_filename} (exists: {file_path.exists()})")
+            
             # generate a descriptive filename for invoice
             buyer_slug = self._create_filename_slug(record.get("buyer_name", "invoice"))
             company_slug = self._create_filename_slug(record.get("company_name", "company"))
             invoice_number = record.get("invoice_number", download_id[:8])
             download_filename = f"{company_slug}_{buyer_slug}_{invoice_number}.pdf"
+            logger.debug(f"[DOWNLOAD] Generated descriptive filename: {download_filename}")
         else:
             # Legacy ZIP file (MCP packages)
             zip_filename = record.get("zip_filename", f"mcp_{download_id}.zip")
@@ -101,16 +113,24 @@ class DownloadManager:
             media_type = "application/zip"
             content_description = "Generated MCP Package"
             
+            logger.debug(f"[DOWNLOAD] ZIP file: {zip_filename} (exists: {file_path.exists()})")
+            
             # generate a descriptive filename for MCP
             prompt_slug = self._create_filename_slug(record.get("prompt", "generated-mcp"))
             download_filename = f"{prompt_slug}_{download_id[:8]}.zip"
+            logger.debug(f"[DOWNLOAD] Generated descriptive filename: {download_filename}")
         
         if not file_path.exists():
-            logger.error(f"File not found: {file_path}")
+            logger.error(f"[DOWNLOAD] File not found: {file_path}")
+            # List all files in downloads directory for debugging
+            all_files = list(self.downloads_dir.glob("*.*"))
+            logger.error(f"[DOWNLOAD] Files in directory: {[f.name for f in all_files]}")
             raise HTTPException(status_code=404, detail="Download file not found")
         
         # serve the file
-        logger.info(f"Serving download: {file_path.name} ({file_path.stat().st_size:,} bytes)")
+        file_size = file_path.stat().st_size
+        logger.info(f"[DOWNLOAD] Serving file: {file_path.name} ({file_size:,} bytes)")
+        logger.debug(f"[DOWNLOAD] Content type: {media_type}, filename: {download_filename}")
         
         return FileResponse(
             path=file_path,
