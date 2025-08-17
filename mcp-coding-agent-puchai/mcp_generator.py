@@ -76,7 +76,7 @@ async def validate() -> str:
     return MY_NUMBER
 
 
-@mcp.tool(description="Generate a professional invoice PDF")
+@mcp.tool(description="Generate a professional BILL PDF")
 async def generate_invoice(
     buyer_name: Annotated[str, Field(description="Name of the buyer/client")],
     company_name: Annotated[str, Field(description="Company name issuing the invoice")],
