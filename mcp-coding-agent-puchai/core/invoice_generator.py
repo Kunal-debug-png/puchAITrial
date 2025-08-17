@@ -299,11 +299,7 @@ class InvoiceGenerator:
             
             # Enhanced Terms and Conditions
             terms_text = """
-            <b>📋 Payment Terms & Conditions:</b><br/><br/>
             
-            • Payment is due within 30 days of invoice date<br/>
-            • Late payments may incur additional fees as per our policy<br/>
-            • All payments should be made in the specified currency<br/><br/>
             
             <b>🙏 Thank you for your business!</b><br/>
             We appreciate your trust in our services. If you have any questions <br/>
