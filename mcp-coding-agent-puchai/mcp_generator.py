@@ -227,7 +227,7 @@ async def generate_invoice(
 ⏰ **Expires:** 24 hours
 ⚡ **Generated in:** {generation_time:.1f}s
 
-Your professional invoice PDF is ready for download!"""
+Your professional Bill PDF is ready for download!"""
         
         logger.info(f"[MCP_TOOL] Returning success response with {len(success_message)} characters")
         
