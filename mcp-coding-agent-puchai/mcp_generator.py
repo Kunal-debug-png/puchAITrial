@@ -214,7 +214,7 @@ async def generate_invoice(
         
         logger.info(f"[MCP_TOOL] Preparing success response with download URL: {download_url}")
         
-        success_message = f"""✅ **Invoice Generated Successfully!**
+        success_message = f"""✅ **Bill Generated Successfully!**
 
 📋 **Details:**
 • Company: {company_name}
