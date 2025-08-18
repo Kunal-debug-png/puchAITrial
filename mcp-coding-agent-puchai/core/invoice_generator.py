@@ -188,7 +188,6 @@ class InvoiceGenerator:
                 [Paragraph("<b>BILL DETAILS:</b>", self.section_header_style)],
                 [Paragraph(f"<b>BILL #:</b> {invoice_number}", self.info_style)],
                 [Paragraph(f"<b>Issue Date:</b> {date}", self.info_style)],
-                [Paragraph(f"<b>Due Date:</b> {due_date}", self.info_style)],
                 [Paragraph(f"<b>From:</b> {company_name}", self.info_style)],
             ]
             
